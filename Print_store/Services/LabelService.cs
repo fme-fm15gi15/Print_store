@@ -28,7 +28,7 @@ public class LabelService
             {
                 page.Size(100, 150, Unit.Millimetre);
                 page.Margin(5, Unit.Millimetre);
-                page.DefaultTextStyle(t => t.FontSize(10));
+                page.DefaultTextStyle(t => t.FontSize(10).FontFamily("Lato", "Noto Sans TC"));
 
                 page.Content().Column(col =>
                 {
