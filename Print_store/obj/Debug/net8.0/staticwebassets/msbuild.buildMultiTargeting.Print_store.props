@@ -1,0 +1,3 @@
+﻿<Project>
+  <Import Project="..\build\Print_store.props" />
+</Project>
