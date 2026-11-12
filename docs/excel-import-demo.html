@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Excel 匯入 → 檢查 → 打 API</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #333; }
+
+  .header { background: #1a1f2e; color: #fff; padding: 16px 24px; }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .header p { font-size: 13px; color: #9aa5b4; margin-top: 4px; }
+
+  .steps { display: flex; padding: 16px 24px; gap: 0; background: #fff; border-bottom: 1px solid #e5e7eb; }
+  .step { flex: 1; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #9ca3af; position: relative; }
+  .step.active { color: #3b82f6; font-weight: 600; }
+  .step.done { color: #10b981; }
+  .step-num { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #d1d5db; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+  .step.active .step-num { border-color: #3b82f6; background: #3b82f6; color: #fff; }
+  .step.done .step-num { border-color: #10b981; background: #10b981; color: #fff; }
+  .step-arrow { margin-left: auto; color: #d1d5db; }
+
+  .container { max-width: 1100px; margin: 24px auto; padding: 0 24px; }
+
+  /* Step 1: Upload */
+  .upload-zone { border: 2px dashed #d1d5db; border-radius: 12px; background: #fff; padding: 48px 24px; text-align: center; cursor: pointer; transition: all 0.2s; }
+  .upload-zone:hover, .upload-zone.drag { border-color: #3b82f6; background: #eff6ff; }
+  .upload-zone input { display: none; }
+  .upload-icon { font-size: 48px; margin-bottom: 12px; }
+  .upload-zone h2 { font-size: 16px; color: #374151; margin-bottom: 6px; }
+  .upload-zone p { font-size: 13px; color: #9ca3af; }
+  .btn-upload { margin-top: 16px; display: inline-block; background: #3b82f6; color: #fff; padding: 10px 24px; border-radius: 8px; font-size: 14px; cursor: pointer; border: none; }
+  .btn-upload:hover { background: #2563eb; }
+
+  /* Step 2: Preview & Validate */
+  .card { background: #fff; border-radius: 12px; border: 1px solid #e5e7eb; overflow: hidden; }
+  .card-header { padding: 14px 20px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center; }
+  .card-title { font-size: 15px; font-weight: 600; }
+  .summary-tags { display: flex; gap: 8px; }
+  .tag { font-size: 12px; padding: 3px 10px; border-radius: 10px; font-weight: 500; }
+  .tag-total { background: #dbeafe; color: #1d4ed8; }
+  .tag-ok { background: #d1fae5; color: #065f46; }
+  .tag-err { background: #fee2e2; color: #991b1b; }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: #f9fafb; padding: 10px 12px; text-align: left; font-size: 12px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
+  td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr.row-err { background: #fff5f5; }
+  tr.row-err td:first-child { border-left: 3px solid #ef4444; }
+
+  .status-ok { display: inline-flex; align-items: center; gap: 4px; color: #10b981; font-size: 12px; font-weight: 500; }
+  .status-err { display: inline-flex; align-items: center; gap: 4px; color: #ef4444; font-size: 12px; font-weight: 500; }
+  .err-msg { font-size: 11px; color: #ef4444; display: block; margin-top: 2px; }
+
+  /* Step 3: API */
+  .api-config { padding: 20px; }
+  .form-row { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .form-group { flex: 1; min-width: 200px; }
+  .form-group label { display: block; font-size: 12px; font-weight: 600; color: #6b7280; margin-bottom: 6px; }
+  .form-group input, .form-group select { width: 100%; padding: 9px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 13px; outline: none; }
+  .form-group input:focus, .form-group select:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #eff6ff; }
+
+  .btn-send { background: #10b981; color: #fff; border: none; padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; }
+  .btn-send:hover { background: #059669; }
+  .btn-send:disabled { background: #6b7280; cursor: not-allowed; }
+
+  .response-box { margin: 16px 20px 20px; }
+  .response-label { font-size: 12px; font-weight: 600; color: #6b7280; margin-bottom: 8px; }
+  .response-list { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; }
+  .res-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+  .res-item.ok { background: #d1fae5; }
+  .res-item.err { background: #fee2e2; }
+  .res-item .res-code { font-weight: 700; min-width: 36px; }
+  .res-item .res-msg { color: #374151; }
+
+  .progress-bar { background: #e5e7eb; border-radius: 4px; height: 6px; margin: 12px 20px; }
+  .progress-fill { background: #3b82f6; height: 100%; border-radius: 4px; transition: width 0.3s; }
+
+  .hidden { display: none; }
+  .section { margin-bottom: 20px; }
+
+  .action-bar { display: flex; gap: 10px; align-items: center; padding: 16px 20px; border-top: 1px solid #e5e7eb; }
+  .btn-reset { background: none; border: 1px solid #d1d5db; color: #6b7280; padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+  .btn-reset:hover { border-color: #9ca3af; color: #374151; }
+  .spacer { flex: 1; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📊 Excel 批次匯入工具</h1>
+  <p>上傳 Excel → 自動驗證資料 → 批次呼叫 API</p>
+</div>
+
+<!-- Steps -->
+<div class="steps">
+  <div class="step active" id="step1-indicator">
+    <span class="step-num">1</span> 上傳 Excel
+    <span class="step-arrow">›</span>
+  </div>
+  <div class="step" id="step2-indicator">
+    <span class="step-num">2</span> 資料檢查
+    <span class="step-arrow">›</span>
+  </div>
+  <div class="step" id="step3-indicator">
+    <span class="step-num">3</span> 送出 API
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- STEP 1: Upload -->
+  <div id="section-upload" class="section">
+    <div class="upload-zone" id="uploadZone">
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+      <div class="upload-icon">📂</div>
+      <h2>拖曳 Excel 檔案到這裡</h2>
+      <p>支援 .xlsx、.xls、.csv 格式</p>
+      <label class="btn-upload" for="fileInput">選擇檔案</label>
+    </div>
+    <p style="text-align:center;margin-top:12px;font-size:12px;color:#9ca3af;">
+      沒有 Excel？
+      <a href="#" onclick="loadDemo(); return false;" style="color:#3b82f6;text-decoration:none;">點此載入示範資料</a>
+    </p>
+  </div>
+
+  <!-- STEP 2: Preview & Validate -->
+  <div id="section-preview" class="section hidden">
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">資料預覽與驗證</span>
+        <div class="summary-tags">
+          <span class="tag tag-total" id="tagTotal">共 0 筆</span>
+          <span class="tag tag-ok" id="tagOk">✅ 0 筆通過</span>
+          <span class="tag tag-err" id="tagErr">❌ 0 筆錯誤</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="previewTable">
+          <thead id="tableHead"></thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+      <div class="action-bar">
+        <button class="btn-reset" onclick="reset()">重新上傳</button>
+        <span class="spacer"></span>
+        <button class="btn-send" id="btnNext" onclick="goToStep3()">下一步：設定 API →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3: API -->
+  <div id="section-api" class="section hidden">
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">API 設定與送出</span>
+        <span class="tag tag-ok" id="tagValid">送出 0 筆有效資料</span>
+      </div>
+      <div class="api-config">
+        <div class="form-row">
+          <div class="form-group" style="flex:2">
+            <label>API 網址</label>
+            <input type="text" id="apiUrl" value="https://httpbin.org/post" placeholder="https://your-api.com/endpoint">
+          </div>
+          <div class="form-group">
+            <label>HTTP 方法</label>
+            <select id="apiMethod">
+              <option>POST</option>
+              <option>PUT</option>
+              <option>PATCH</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Authorization Header（選填）</label>
+            <input type="text" id="apiToken" placeholder="Bearer your-token-here">
+          </div>
+          <div class="form-group">
+            <label>每批次筆數</label>
+            <select id="batchSize">
+              <option value="1">逐筆送出</option>
+              <option value="10" selected>10 筆/批</option>
+              <option value="50">50 筆/批</option>
+              <option value="999">全部一次</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="action-bar">
+        <button class="btn-reset" onclick="goToStep2()">← 返回檢查</button>
+        <span class="spacer"></span>
+        <button class="btn-send" id="btnSend" onclick="sendApi()">🚀 開始送出 API</button>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div id="responseSection" class="card hidden" style="margin-top:16px">
+      <div class="card-header">
+        <span class="card-title">送出進度</span>
+        <span id="progressLabel" style="font-size:13px;color:#6b7280">0 / 0</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill" style="width:0%"></div>
+      </div>
+      <div class="response-box">
+        <div class="response-label">回應記錄</div>
+        <div class="response-list" id="responseList"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let rows = [];
+let validRows = [];
+
+// Demo data
+function loadDemo() {
+  rows = [
+    { 訂單編號: 'ORD-001', 收件人: '王小明', 電話: '0912345678', 門市代碼: '006358', 門市名稱: '7-ELEVEN 信義' },
+    { 訂單編號: 'ORD-002', 收件人: '李大華', 電話: '0922-456-789', 門市代碼: '003201', 門市名稱: '全家 新莊' },
+    { 訂單編號: '', 收件人: '張小美', 電話: '0933567890', 門市代碼: '008811', 門市名稱: '萊爾富 板橋' },
+    { 訂單編號: 'ORD-004', 收件人: '', 電話: '0944678901', 門市代碼: '002211', 門市名稱: '7-ELEVEN 中山' },
+    { 訂單編號: 'ORD-005', 收件人: '陳小龍', 電話: '095', 門市代碼: '007744', 門市名稱: '全家 三重' },
+    { 訂單編號: 'ORD-006', 收件人: '林大成', 電話: '0966789012', 門市代碼: '001122', 門市名稱: '7-ELEVEN 內湖' },
+  ];
+  renderPreview();
+}
+
+// File upload
+document.getElementById('fileInput').addEventListener('change', (e) => {
+  if (e.target.files[0]) readFile(e.target.files[0]);
+});
+const zone = document.getElementById('uploadZone');
+zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+zone.addEventListener('drop', (e) => {
+  e.preventDefault(); zone.classList.remove('drag');
+  if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]);
+});
+
+function readFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const wb = XLSX.read(e.target.result, { type: 'binary' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    if (rows.length === 0) { alert('Excel 是空的！'); return; }
+    renderPreview();
+  };
+  reader.readAsBinaryString(file);
+}
+
+function validate(row) {
+  const errors = [];
+  const keys = Object.keys(row);
+  // 通用驗證：空白欄位
+  keys.forEach(k => {
+    if (String(row[k]).trim() === '') errors.push(`「${k}」不可空白`);
+  });
+  // 電話格式
+  const phoneKey = keys.find(k => k.includes('電話') || k.includes('phone'));
+  if (phoneKey) {
+    const p = String(row[phoneKey]).replace(/-/g, '');
+    if (p && !/^09\d{8}$/.test(p)) errors.push('電話格式錯誤（需09開頭共10碼）');
+  }
+  return errors;
+}
+
+function renderPreview() {
+  if (!rows.length) return;
+  const cols = Object.keys(rows[0]);
+  let okCount = 0, errCount = 0;
+  validRows = [];
+
+  // Header
+  document.getElementById('tableHead').innerHTML =
+    `<tr><th>#</th>${cols.map(c => `<th>${c}</th>`).join('')}<th>狀態</th></tr>`;
+
+  // Body
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+  rows.forEach((row, i) => {
+    const errors = validate(row);
+    const isOk = errors.length === 0;
+    if (isOk) { okCount++; validRows.push(row); } else { errCount++; }
+
+    const tr = document.createElement('tr');
+    if (!isOk) tr.classList.add('row-err');
+    tr.innerHTML = `<td>${i + 1}</td>` +
+      cols.map(c => `<td>${row[c] || '<span style="color:#d1d5db">—</span>'}</td>`).join('') +
+      `<td>${isOk
+        ? `<span class="status-ok">✅ 通過</span>`
+        : `<span class="status-err">❌ 錯誤</span><span class="err-msg">${errors.join('；')}</span>`
+      }</td>`;
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('tagTotal').textContent = `共 ${rows.length} 筆`;
+  document.getElementById('tagOk').textContent = `✅ ${okCount} 筆通過`;
+  document.getElementById('tagErr').textContent = `❌ ${errCount} 筆錯誤`;
+  document.getElementById('btnNext').disabled = okCount === 0;
+
+  setStep(2);
+}
+
+function goToStep3() {
+  document.getElementById('tagValid').textContent = `送出 ${validRows.length} 筆有效資料`;
+  setStep(3);
+}
+function goToStep2() { setStep(2); }
+
+async function sendApi() {
+  const url = document.getElementById('apiUrl').value.trim();
+  const method = document.getElementById('apiMethod').value;
+  const token = document.getElementById('apiToken').value.trim();
+  const batchSize = parseInt(document.getElementById('batchSize').value);
+
+  if (!url) { alert('請輸入 API 網址'); return; }
+
+  document.getElementById('btnSend').disabled = true;
+  document.getElementById('responseSection').classList.remove('hidden');
+  document.getElementById('responseList').innerHTML = '';
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = token;
+
+  let done = 0;
+  const total = validRows.length;
+
+  const batches = [];
+  for (let i = 0; i < total; i += batchSize) {
+    batches.push(validRows.slice(i, i + batchSize));
+  }
+
+  for (let b = 0; b < batches.length; b++) {
+    const batch = batches[b];
+    const body = batchSize === 1 ? batch[0] : batch;
+    const startIdx = b * batchSize + 1;
+    const endIdx = Math.min((b + 1) * batchSize, total);
+
+    try {
+      const resp = await fetch(url, { method, headers, body: JSON.stringify(body) });
+      const ok = resp.ok;
+      done += batch.length;
+
+      const item = document.createElement('div');
+      item.className = `res-item ${ok ? 'ok' : 'err'}`;
+      item.innerHTML = `<span class="res-code">${resp.status}</span>
+        <span class="res-msg">第 ${startIdx}–${endIdx} 筆 → ${ok ? '成功' : `失敗（${resp.statusText}）`}</span>`;
+      document.getElementById('responseList').appendChild(item);
+    } catch (err) {
+      done += batch.length;
+      const item = document.createElement('div');
+      item.className = 'res-item err';
+      item.innerHTML = `<span class="res-code">ERR</span><span class="res-msg">第 ${startIdx}–${endIdx} 筆 → ${err.message}</span>`;
+      document.getElementById('responseList').appendChild(item);
+    }
+
+    const pct = Math.round(done / total * 100);
+    document.getElementById('progressFill').style.width = pct + '%';
+    document.getElementById('progressLabel').textContent = `${done} / ${total}`;
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  document.getElementById('btnSend').disabled = false;
+}
+
+function setStep(n) {
+  document.getElementById('section-upload').classList.toggle('hidden', n !== 1);
+  document.getElementById('section-preview').classList.toggle('hidden', n !== 2);
+  document.getElementById('section-api').classList.toggle('hidden', n !== 3);
+  [1,2,3].forEach(i => {
+    const el = document.getElementById(`step${i}-indicator`);
+    el.classList.remove('active', 'done');
+    if (i < n) el.classList.add('done');
+    if (i === n) el.classList.add('active');
+  });
+}
+
+function reset() {
+  rows = []; validRows = [];
+  document.getElementById('fileInput').value = '';
+  document.getElementById('responseSection').classList.add('hidden');
+  setStep(1);
+}
+</script>
+</body>
+</html>
