@@ -97,6 +97,20 @@
   .hist-fails td, .hist-fails th { padding: 4px 6px; border-bottom: 1px solid #fee2e2; text-align: left; }
   .hist-fails th { color: #9ca3af; font-weight: 500; background: #fff5f5; }
 
+  /* 送出方式 / Job 模式 */
+  .mode-switch { display: flex; gap: 10px; flex-wrap: wrap; }
+  .form-group label.mode-opt { display: flex; align-items: flex-start; gap: 8px; flex: 1; min-width: 260px; border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px; cursor: pointer; font-weight: 500; color: #374151; margin: 0; }
+  .form-group .mode-opt input { width: auto; flex: none; margin-top: 3px; }
+  .mode-opt small { display: block; font-weight: 400; color: #9ca3af; margin-top: 2px; }
+  .mode-opt:has(input:checked) { border-color: #3b82f6; background: #eff6ff; }
+  .job-hint { margin-top: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; font-size: 12px; color: #475569; line-height: 1.7; }
+  .job-hint code { background: #e2e8f0; padding: 1px 5px; border-radius: 4px; }
+  .job-table { width: 100%; font-size: 12px; margin-top: 8px; }
+  .job-table td, .job-table th { padding: 6px 8px; }
+  .st { font-size: 12px; white-space: nowrap; }
+  .st-pending { color: #9ca3af; } .st-running { color: #3b82f6; } .st-success { color: #10b981; }
+  .st-failed { color: #ef4444; } .st-skipped { color: #f59e0b; }
+
   .action-bar { display: flex; gap: 10px; align-items: center; padding: 16px 20px; border-top: 1px solid #e5e7eb; }
   .btn-reset { background: none; border: 1px solid #d1d5db; color: #6b7280; padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; }
   .btn-reset:hover { border-color: #9ca3af; color: #374151; }
@@ -194,9 +208,26 @@
       </div>
       <div class="api-config">
         <div class="form-row">
+          <div class="form-group" style="flex:1 1 100%">
+            <label>送出方式</label>
+            <div class="mode-switch">
+              <label class="mode-opt"><input type="radio" name="sendMode" value="direct" checked onchange="onModeChange()">
+                <span>前端直接呼叫 API<small>瀏覽器一批一批打，要等全部打完，關掉網頁就中斷</small></span></label>
+              <label class="mode-opt"><input type="radio" name="sendMode" value="job" onchange="onModeChange()">
+                <span>後端批次 Job（建議）<small>整份一次交給中間服務，立刻拿到 Job ID，後端一筆一筆打廠商</small></span></label>
+            </div>
+            <div id="jobHint" class="job-hint hidden">
+              <b>流程：</b>① <code>POST {網址}</code> 送出全部資料 → 回 <code>202 { jobId }</code>
+              ② 每秒 <code>GET {網址}/{jobId}</code> 查進度 ③ 後端逐筆打廠商：地址錯誤等 4xx <b>不重試</b>、5xx <b>自動重試</b>、同訂單編號<b>不重複送</b><br>
+              網址填 <code>mock://batch-job</code> 是瀏覽器內的模擬服務（重新整理會中斷，真實後端不受影響）；換成你們中間服務的網址即可串接。
+              <a href="#" onclick="clearSentOrders();return false;" style="color:#f59e0b;text-decoration:none">清除「已送過」記錄（<span id="sentCount">0</span> 筆）</a>
+            </div>
+          </div>
+        </div>
+        <div class="form-row">
           <div class="form-group" style="flex:2">
             <label>API 網址
-              <span style="font-weight:400;margin-left:8px;">
+              <span id="directLinks" style="font-weight:400;margin-left:8px;">
                 <a href="#" onclick="document.getElementById('apiUrl').value='https://httpbin.org/post';return false;" style="color:#10b981;font-size:11px;text-decoration:none">✅ 測試成功</a>
                 &nbsp;｜&nbsp;
                 <a href="#" onclick="document.getElementById('apiUrl').value='https://httpbin.org/status/400';return false;" style="color:#ef4444;font-size:11px;text-decoration:none">❌ 模擬失敗(400)</a>
@@ -206,7 +237,7 @@
             </label>
             <input type="text" id="apiUrl" value="https://httpbin.org/post" placeholder="https://your-api.com/endpoint">
           </div>
-          <div class="form-group">
+          <div class="form-group" id="methodGroup">
             <label>HTTP 方法</label>
             <select id="apiMethod">
               <option>POST</option>
@@ -220,7 +251,7 @@
             <label>Authorization Header（選填）</label>
             <input type="text" id="apiToken" placeholder="Bearer your-token-here">
           </div>
-          <div class="form-group">
+          <div class="form-group" id="batchGroup">
             <label>每批次筆數</label>
             <select id="batchSize">
               <option value="1">逐筆送出</option>
@@ -405,21 +436,25 @@ function checkAddress(addr) {
   return null;
 }
 
+// 模擬廠商的業務驗證（地址、門市代碼）
+function businessErrors(row) {
+  const errors = [];
+  const order = getOrderNo(row);
+  const addrKey = Object.keys(row).find(k => k.includes('地址') || k.toLowerCase().includes('address'));
+  const storeKey = Object.keys(row).find(k => k.includes('門市代碼'));
+  if (addrKey) {
+    const msg = checkAddress(row[addrKey]);
+    if (msg) errors.push({ order, field: addrKey, code: 'INVALID_ADDRESS', message: `地址錯誤：${msg}` });
+  }
+  if (storeKey && !/^\d{6}$/.test(String(row[storeKey]))) {
+    errors.push({ order, field: storeKey, code: 'STORE_NOT_FOUND', message: `門市代碼不存在：${row[storeKey]}` });
+  }
+  return errors;
+}
+
 function mockFetch(body) {
   const list = Array.isArray(body) ? body : [body];
-  const errors = [];
-  list.forEach(row => {
-    const order = getOrderNo(row);
-    const addrKey = Object.keys(row).find(k => k.includes('地址') || k.toLowerCase().includes('address'));
-    const storeKey = Object.keys(row).find(k => k.includes('門市代碼'));
-    if (addrKey) {
-      const msg = checkAddress(row[addrKey]);
-      if (msg) errors.push({ order, field: addrKey, code: 'INVALID_ADDRESS', message: `地址錯誤：${msg}` });
-    }
-    if (storeKey && !/^\d{6}$/.test(String(row[storeKey]))) {
-      errors.push({ order, field: storeKey, code: 'STORE_NOT_FOUND', message: `門市代碼不存在：${row[storeKey]}` });
-    }
-  });
+  const errors = list.flatMap(businessErrors);
   const ok = errors.length === 0;
   const payload = ok
     ? { success: true, message: `已建立 ${list.length} 筆訂單` }
@@ -429,6 +464,217 @@ function mockFetch(body) {
     statusText: ok ? 'OK' : 'Unprocessable Entity',
     headers: { 'Content-Type': 'application/json' }
   })), 300));
+}
+
+// ── 後端批次 Job 模式 ─────────────────────────────────
+// 中間服務的 API 約定：
+//   POST {url}          body: [ {...}, {...} ]  → 202 { jobId, status, total }
+//   GET  {url}/{jobId}                          → { jobId, status: queued|running|done, total, processed,
+//                                                   success, failed, skipped, items: [{ index, order, status, httpStatus, attempts, reason }] }
+const JOB_MOCK_URL = 'mock://batch-job';
+const MOCK_CONCURRENCY = 3;   // 模擬服務同時打廠商的筆數
+const MOCK_MAX_ATTEMPTS = 3;  // 5xx 最多嘗試次數
+const delay = ms => new Promise(r => setTimeout(r, ms));
+
+function getMode() {
+  return document.querySelector('input[name="sendMode"]:checked').value;
+}
+
+function onModeChange() {
+  const job = getMode() === 'job';
+  const urlEl = document.getElementById('apiUrl');
+  if (job && (urlEl.value.startsWith('https://httpbin.org') || urlEl.value.startsWith('mock://'))) urlEl.value = JOB_MOCK_URL;
+  if (!job && urlEl.value === JOB_MOCK_URL) urlEl.value = 'https://httpbin.org/post';
+  ['directLinks', 'methodGroup', 'batchGroup'].forEach(id => document.getElementById(id).classList.toggle('hidden', job));
+  document.getElementById('jobHint').classList.toggle('hidden', !job);
+  updateSentCount();
+}
+
+// 模擬「廠商已收過的訂單編號」，用來示範防重複下單
+function getSentOrders() { return JSON.parse(localStorage.getItem('vendorSentOrders') || '[]'); }
+function addSentOrder(o) { const s = getSentOrders(); if (o && !s.includes(o)) { s.push(o); localStorage.setItem('vendorSentOrders', JSON.stringify(s)); } }
+function clearSentOrders() { localStorage.removeItem('vendorSentOrders'); updateSentCount(); }
+function updateSentCount() { document.getElementById('sentCount').textContent = getSentOrders().length; }
+
+// 模擬中間服務（跑在瀏覽器記憶體裡）
+const mockJobs = {};
+
+async function mockSubmitJob(rows) {
+  await delay(200);
+  const jobId = 'JOB-' + Date.now().toString(36).toUpperCase();
+  mockJobs[jobId] = {
+    jobId, status: 'queued', total: rows.length, processed: 0, success: 0, failed: 0, skipped: 0,
+    items: rows.map((row, i) => ({ index: i + 1, order: getOrderNo(row), status: 'pending', httpStatus: null, attempts: 0, reason: '', row }))
+  };
+  setTimeout(() => runMockJob(mockJobs[jobId]), 500); // 背景處理，不阻塞回應
+  return { jobId, status: 'queued', total: rows.length };
+}
+
+async function mockGetJob(jobId) {
+  await delay(100);
+  const job = mockJobs[jobId];
+  if (!job) throw new Error('查無此 Job：' + jobId);
+  return JSON.parse(JSON.stringify(job, (k, v) => k === 'row' ? undefined : v));
+}
+
+async function runMockJob(job) {
+  job.status = 'running';
+  const queue = [...job.items];
+  const worker = async () => { while (queue.length) await processMockItem(job, queue.shift()); };
+  await Promise.all(Array.from({ length: MOCK_CONCURRENCY }, worker));
+  job.status = 'done';
+}
+
+async function processMockItem(job, item) {
+  item.status = 'running';
+  if (item.order && getSentOrders().includes(item.order)) {
+    item.status = 'skipped';
+    item.reason = '此訂單編號已送過，略過（防重複下單）';
+    job.skipped++; job.processed++;
+    return;
+  }
+  for (let attempt = 1; attempt <= MOCK_MAX_ATTEMPTS; attempt++) {
+    item.attempts = attempt;
+    const r = await mockVendorCall(item.row, attempt);
+    item.httpStatus = r.status;
+    if (r.status === 200) {
+      item.status = 'success'; item.reason = attempt > 1 ? `重試第 ${attempt - 1} 次後成功` : '';
+      job.success++; addSentOrder(item.order);
+      break;
+    }
+    if (r.status < 500) { // 4xx = 資料錯誤，重試也沒用
+      item.status = 'failed'; item.reason = r.reason; job.failed++;
+      break;
+    }
+    if (attempt === MOCK_MAX_ATTEMPTS) {
+      item.status = 'failed'; item.reason = `廠商暫時無法服務（${r.status}），重試 ${MOCK_MAX_ATTEMPTS - 1} 次仍失敗`; job.failed++;
+      break;
+    }
+    item.reason = `廠商回 ${r.status}，${attempt * 0.5} 秒後重試…`;
+    await delay(attempt * 500);
+  }
+  job.processed++;
+}
+
+// 模擬廠商「單筆」API
+async function mockVendorCall(row, attempt) {
+  await delay(200 + Math.random() * 300);
+  const errors = businessErrors(row);
+  if (errors.length) return { status: 422, reason: errors.map(e => e.message).join('；') };
+  // 示意：訂單編號尾數 2、6 第一次會遇到廠商忙碌（503），用來展示自動重試
+  if (attempt === 1 && /[26]$/.test(getOrderNo(row))) return { status: 503 };
+  return { status: 200 };
+}
+
+async function submitJob(url, headers, rows) {
+  if (url.startsWith('mock://')) return mockSubmitJob(rows);
+  const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(rows) });
+  const text = await resp.text();
+  if (!resp.ok) throw new Error(`${resp.status} ${extractReason(text, resp.statusText)}`);
+  const data = JSON.parse(text);
+  if (!data.jobId) throw new Error('回應缺少 jobId');
+  return data;
+}
+
+async function getJob(url, headers, jobId) {
+  if (url.startsWith('mock://')) return mockGetJob(jobId);
+  const resp = await fetch(`${url.replace(/\/$/, '')}/${encodeURIComponent(jobId)}`, { headers });
+  if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
+  return resp.json();
+}
+
+const JOB_STATUS_TEXT = { queued: '排隊中', running: '處理中', done: '已完成' };
+const ITEM_STATUS_TEXT = { pending: '⏳ 等待中', running: '🔄 處理中', success: '✅ 成功', failed: '❌ 失敗', skipped: '⏭ 略過' };
+
+function renderJob(s) {
+  const pct = s.total ? Math.round(s.processed / s.total * 100) : 0;
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressLabel').textContent = `${s.processed} / ${s.total}`;
+  document.getElementById('jobStatus').innerHTML = `
+    <span class="tag tag-total">${JOB_STATUS_TEXT[s.status] || esc(s.status)}</span>
+    <span class="tag tag-ok">✅ 成功 ${s.success}</span>
+    <span class="tag tag-err">❌ 失敗 ${s.failed}</span>
+    ${s.skipped ? `<span class="tag" style="background:#fef3c7;color:#92400e">⏭ 略過 ${s.skipped}</span>` : ''}`;
+  document.getElementById('jobItems').innerHTML = `
+    <table class="job-table">
+      <tr><th>#</th><th>訂單編號</th><th>狀態</th><th>HTTP</th><th>嘗試</th><th>說明</th></tr>
+      ${(s.items || []).map(it => `<tr class="${it.status === 'failed' ? 'row-err' : ''}">
+        <td>${it.index}</td><td>${esc(it.order) || '—'}</td>
+        <td><span class="st st-${esc(it.status)}">${ITEM_STATUS_TEXT[it.status] || esc(it.status)}</span></td>
+        <td>${esc(it.httpStatus ?? '')}</td><td>${it.attempts || ''}</td>
+        <td style="color:${it.status === 'failed' ? '#dc2626' : '#6b7280'}">${esc(it.reason)}</td>
+      </tr>`).join('')}
+    </table>`;
+}
+
+async function sendJob() {
+  const url = document.getElementById('apiUrl').value.trim();
+  const token = document.getElementById('apiToken').value.trim();
+  if (!url) { alert('請輸入 API 網址'); return; }
+
+  const rowsToSend = validRows;
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = token;
+
+  document.getElementById('btnSend').disabled = true;
+  document.getElementById('responseSection').classList.remove('hidden');
+  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('progressLabel').textContent = `0 / ${rowsToSend.length}`;
+  const list = document.getElementById('responseList');
+  list.innerHTML = '';
+
+  let job;
+  try {
+    job = await submitJob(url, headers, rowsToSend);
+  } catch (err) {
+    list.innerHTML = `<div class="res-item err"><span class="res-code">ERR</span><span class="res-msg">建立 Job 失敗：${esc(err.message)}</span></div>`;
+    document.getElementById('btnSend').disabled = false;
+    return;
+  }
+
+  list.innerHTML = `
+    <div class="res-item ok"><span class="res-code">202</span>
+      <span class="res-msg">已受理 ${rowsToSend.length} 筆，Job ID：<b>${esc(job.jobId)}</b>（後端背景處理中，前端只負責查進度）</span></div>
+    <div id="jobStatus" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px"></div>
+    <div id="jobItems"></div>`;
+
+  // 輪詢進度
+  let s, pollErrors = 0;
+  while (true) {
+    await delay(1000);
+    try {
+      s = await getJob(url, headers, job.jobId);
+      pollErrors = 0;
+    } catch (err) {
+      if (++pollErrors >= 5) {
+        list.insertAdjacentHTML('beforeend', `<div class="res-item err"><span class="res-msg">查詢進度連續失敗，已停止：${esc(err.message)}（Job 仍在後端執行，可稍後用 Job ID 查詢）</span></div>`);
+        document.getElementById('btnSend').disabled = false;
+        return;
+      }
+      continue;
+    }
+    renderJob(s);
+    if (s.status === 'done') break;
+  }
+
+  const failedItems = (s.items || []).filter(it => it.status === 'failed');
+  saveHistory({
+    time: new Date().toLocaleString('zh-TW'),
+    url, method: 'POST（Job）', jobId: job.jobId,
+    total: s.total, success: s.success, fail: s.failed, skipped: s.skipped || 0,
+    failures: failedItems.map(it => ({ range: String(it.index), status: it.httpStatus ?? 'ERR', orders: it.order, reason: it.reason }))
+  });
+  updateSentCount();
+
+  window._failedRows = failedItems.map(it => rowsToSend[it.index - 1]).filter(Boolean);
+  const summary = document.createElement('div');
+  summary.style.cssText = 'margin-top:10px;padding:12px;background:#f9fafb;border-radius:8px;font-size:13px;border:1px solid #e5e7eb;';
+  summary.innerHTML = `<strong>Job 完成</strong>　✅ 成功 ${s.success} 筆　❌ 失敗 ${s.failed} 筆` +
+    (s.skipped ? `　⏭ 略過 ${s.skipped} 筆（已送過）` : '') +
+    (s.failed > 0 ? `<button onclick="retryFailed()" style="margin-left:12px;background:#ef4444;color:#fff;border:none;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer">🔄 重送失敗的 ${s.failed} 筆</button>
+      <div style="margin-top:6px;font-size:12px;color:#9ca3af">422 是資料錯誤，重送一樣會失敗，請先修正 Excel 再重新上傳</div>` : '');
+  list.appendChild(summary);
+  document.getElementById('btnSend').disabled = false;
 }
 
 function getOrderNo(row) {
@@ -452,6 +698,7 @@ function esc(v) {
 }
 
 async function sendApi() {
+  if (getMode() === 'job') return sendJob();
   const url = document.getElementById('apiUrl').value.trim();
   const method = document.getElementById('apiMethod').value;
   const token = document.getElementById('apiToken').value.trim();
@@ -651,7 +898,9 @@ function renderHistory() {
         <span class="tag tag-total">共 ${h.total} 筆</span>
         <span class="tag tag-ok">✅ 成功 ${h.success}</span>
         <span class="tag tag-err">❌ 失敗 ${h.fail}</span>
-        <span style="margin-left:auto;font-size:11px;color:#9ca3af">${h.method}</span>
+        ${h.skipped ? `<span class="tag" style="background:#fef3c7;color:#92400e">⏭ 略過 ${h.skipped}</span>` : ''}
+        ${h.jobId ? `<span style="font-size:11px;color:#6b7280">Job：${esc(h.jobId)}</span>` : ''}
+        <span style="margin-left:auto;font-size:11px;color:#9ca3af">${esc(h.method)}</span>
       </div>
       <div class="hist-url">🔗 ${esc(h.url)}</div>
       ${renderHistFailures(h)}
