@@ -91,6 +91,11 @@
   .hist-url { font-size: 12px; color: #6b7280; font-family: monospace; word-break: break-all; margin-top:4px; }
   .btn-hist { background: none; border: 1px solid #d1d5db; color: #6b7280; font-size: 12px; padding: 5px 12px; border-radius: 6px; cursor: pointer; }
   .btn-hist:hover { border-color: #3b82f6; color: #3b82f6; }
+  .hist-fails { margin-top: 8px; border-top: 1px dashed #fecaca; padding-top: 6px; }
+  .hist-fails summary { cursor: pointer; font-size: 12px; color: #ef4444; }
+  .hist-fails table { width: 100%; margin-top: 6px; font-size: 12px; border-collapse: collapse; }
+  .hist-fails td, .hist-fails th { padding: 4px 6px; border-bottom: 1px solid #fee2e2; text-align: left; }
+  .hist-fails th { color: #9ca3af; font-weight: 500; background: #fff5f5; }
 
   .action-bar { display: flex; gap: 10px; align-items: center; padding: 16px 20px; border-top: 1px solid #e5e7eb; }
   .btn-reset { background: none; border: 1px solid #d1d5db; color: #6b7280; padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; }
@@ -195,6 +200,8 @@
                 <a href="#" onclick="document.getElementById('apiUrl').value='https://httpbin.org/post';return false;" style="color:#10b981;font-size:11px;text-decoration:none">✅ 測試成功</a>
                 &nbsp;｜&nbsp;
                 <a href="#" onclick="document.getElementById('apiUrl').value='https://httpbin.org/status/400';return false;" style="color:#ef4444;font-size:11px;text-decoration:none">❌ 模擬失敗(400)</a>
+                &nbsp;｜&nbsp;
+                <a href="#" onclick="useMockApi();return false;" style="color:#f59e0b;font-size:11px;text-decoration:none">🧪 模擬業務錯誤（地址錯誤）</a>
               </span>
             </label>
             <input type="text" id="apiUrl" value="https://httpbin.org/post" placeholder="https://your-api.com/endpoint">
@@ -255,11 +262,11 @@ let validRows = [];
 
 // Download blank template
 function downloadTemplate() {
-  const cols = ['訂單編號', '收件人', '電話', '門市代碼', '門市名稱'];
+  const cols = ['訂單編號', '收件人', '電話', '地址', '門市代碼', '門市名稱'];
   const sample = [
-    ['ORD-001', '王小明', '0912345678', '006358', '7-ELEVEN 信義門市'],
-    ['ORD-002', '李大華', '0922456789', '003201', '全家 新莊店'],
-    ['', '', '', '', ''] // 空白列供填寫
+    ['ORD-001', '王小明', '0912345678', '台北市信義區市府路45號', '006358', '7-ELEVEN 信義門市'],
+    ['ORD-002', '李大華', '0922456789', '新北市新莊區中正路100號', '003201', '全家 新莊店'],
+    ['', '', '', '', '', ''] // 空白列供填寫
   ];
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet([cols, ...sample]);
@@ -276,12 +283,17 @@ function downloadTemplate() {
 // Demo data
 function loadDemo() {
   rows = [
-    { 訂單編號: 'ORD-001', 收件人: '王小明', 電話: '0912345678', 門市代碼: '006358', 門市名稱: '7-ELEVEN 信義' },
-    { 訂單編號: 'ORD-002', 收件人: '李大華', 電話: '0922-456-789', 門市代碼: '003201', 門市名稱: '全家 新莊' },
-    { 訂單編號: '', 收件人: '張小美', 電話: '0933567890', 門市代碼: '008811', 門市名稱: '萊爾富 板橋' },
-    { 訂單編號: 'ORD-004', 收件人: '', 電話: '0944678901', 門市代碼: '002211', 門市名稱: '7-ELEVEN 中山' },
-    { 訂單編號: 'ORD-005', 收件人: '陳小龍', 電話: '095', 門市代碼: '007744', 門市名稱: '全家 三重' },
-    { 訂單編號: 'ORD-006', 收件人: '林大成', 電話: '0966789012', 門市代碼: '001122', 門市名稱: '7-ELEVEN 內湖' },
+    // 前端驗證就會擋下的錯誤：空白欄位、電話格式
+    { 訂單編號: 'ORD-001', 收件人: '王小明', 電話: '0912345678', 地址: '台北市信義區市府路45號', 門市代碼: '006358', 門市名稱: '7-ELEVEN 信義' },
+    { 訂單編號: 'ORD-002', 收件人: '李大華', 電話: '0922-456-789', 地址: '新北市新莊區中正路100號', 門市代碼: '003201', 門市名稱: '全家 新莊' },
+    { 訂單編號: '', 收件人: '張小美', 電話: '0933567890', 地址: '新北市板橋區文化路一段188號', 門市代碼: '008811', 門市名稱: '萊爾富 板橋' },
+    { 訂單編號: 'ORD-004', 收件人: '', 電話: '0944678901', 地址: '台北市中山區南京東路二段50號', 門市代碼: '002211', 門市名稱: '7-ELEVEN 中山' },
+    { 訂單編號: 'ORD-005', 收件人: '陳小龍', 電話: '095', 地址: '新北市三重區重新路三段9號', 門市代碼: '007744', 門市名稱: '全家 三重' },
+    { 訂單編號: 'ORD-006', 收件人: '林大成', 電話: '0966789012', 地址: '台北市內湖區成功路四段3號', 門市代碼: '001122', 門市名稱: '7-ELEVEN 內湖' },
+    // 前端驗證通過，但送到 API 才會被擋下的業務錯誤（搭配「🧪 模擬業務錯誤」測試）
+    { 訂單編號: 'ORD-007', 收件人: '黃小芬', 電話: '0977123456', 地址: '台北市火星區光明路1號', 門市代碼: '005566', 門市名稱: '7-ELEVEN 光明' },
+    { 訂單編號: 'ORD-008', 收件人: '吳志明', 電話: '0988234567', 地址: '高雄市前鎮區', 門市代碼: '004433', 門市名稱: '全家 前鎮' },
+    { 訂單編號: 'ORD-009', 收件人: '鄭雅婷', 電話: '0911345678', 地址: '台中市西屯區台灣大道三段99號', 門市代碼: '12AB', 門市名稱: '萊爾富 西屯' },
   ];
   renderPreview();
 }
@@ -369,6 +381,76 @@ function goToStep3() {
 }
 function goToStep2() { setStep(2); }
 
+// ── 模擬 API（不連網，在瀏覽器內模擬後端的業務驗證）────────
+const MOCK_URL = 'mock://address-check';
+const CITIES = ['台北市','新北市','桃園市','台中市','台南市','高雄市','基隆市','新竹市','嘉義市',
+  '新竹縣','苗栗縣','彰化縣','南投縣','雲林縣','嘉義縣','屏東縣','宜蘭縣','花蓮縣','台東縣','澎湖縣','金門縣','連江縣'];
+// 示意用：只驗台北市 12 個行政區（其他縣市不檢查區名，避免誤判）
+const TAIPEI_DISTRICTS = ['中正區','大同區','中山區','松山區','大安區','萬華區','信義區','士林區','北投區','內湖區','南港區','文山區'];
+
+function useMockApi() {
+  document.getElementById('apiUrl').value = MOCK_URL;
+  document.getElementById('batchSize').value = '1'; // 逐筆送出，才能看出每一筆的錯誤原因
+}
+
+function checkAddress(addr) {
+  const a = String(addr || '').replace(/臺/g, '台').trim();
+  if (!a) return '地址不可空白';
+  const city = CITIES.find(c => a.startsWith(c));
+  if (!city) return '查無此縣市';
+  const m = a.slice(city.length).match(/^(.{1,3}?[區鄉鎮市])/);
+  if (!m) return '缺少鄉鎮市區';
+  if (city === '台北市' && !TAIPEI_DISTRICTS.includes(m[1])) return `查無此行政區：${city}${m[1]}`;
+  if (!/[路街道巷弄段]/.test(a) || !/\d+號/.test(a)) return '地址不完整（缺少路名或門牌號碼）';
+  return null;
+}
+
+function mockFetch(body) {
+  const list = Array.isArray(body) ? body : [body];
+  const errors = [];
+  list.forEach(row => {
+    const order = getOrderNo(row);
+    const addrKey = Object.keys(row).find(k => k.includes('地址') || k.toLowerCase().includes('address'));
+    const storeKey = Object.keys(row).find(k => k.includes('門市代碼'));
+    if (addrKey) {
+      const msg = checkAddress(row[addrKey]);
+      if (msg) errors.push({ order, field: addrKey, code: 'INVALID_ADDRESS', message: `地址錯誤：${msg}` });
+    }
+    if (storeKey && !/^\d{6}$/.test(String(row[storeKey]))) {
+      errors.push({ order, field: storeKey, code: 'STORE_NOT_FOUND', message: `門市代碼不存在：${row[storeKey]}` });
+    }
+  });
+  const ok = errors.length === 0;
+  const payload = ok
+    ? { success: true, message: `已建立 ${list.length} 筆訂單` }
+    : { success: false, message: errors.map(e => e.message).join('；'), errors };
+  return new Promise(r => setTimeout(() => r(new Response(JSON.stringify(payload), {
+    status: ok ? 200 : 422,
+    statusText: ok ? 'OK' : 'Unprocessable Entity',
+    headers: { 'Content-Type': 'application/json' }
+  })), 300));
+}
+
+function getOrderNo(row) {
+  const k = Object.keys(row).find(k => k.includes('訂單') || k.toLowerCase().includes('order'));
+  return k ? String(row[k]) : '';
+}
+
+// 從 API 回應抓出可讀的錯誤原因
+function extractReason(respText, fallback) {
+  try {
+    const j = JSON.parse(respText);
+    if (j.message) return String(j.message);
+    if (j.error) return typeof j.error === 'string' ? j.error : JSON.stringify(j.error);
+    if (Array.isArray(j.errors)) return j.errors.map(e => e.message || JSON.stringify(e)).join('；');
+  } catch {}
+  return (respText || '').trim().substring(0, 120) || fallback;
+}
+
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
 async function sendApi() {
   const url = document.getElementById('apiUrl').value.trim();
   const method = document.getElementById('apiMethod').value;
@@ -386,6 +468,7 @@ async function sendApi() {
 
   let done = 0, successCount = 0, failCount = 0;
   const failedRows = [];
+  const failures = []; // 給歷史記錄用：哪幾筆、狀態碼、原因
   const total = validRows.length;
 
   const batches = [];
@@ -399,7 +482,9 @@ async function sendApi() {
     const endIdx = Math.min(startIdx + batch.length - 1, total);
 
     try {
-      const resp = await fetch(url, { method, headers, body: JSON.stringify(body) });
+      const resp = url.startsWith('mock://')
+        ? await mockFetch(body)
+        : await fetch(url, { method, headers, body: JSON.stringify(body) });
       let respText = '';
       try { respText = await resp.clone().text(); } catch {}
       const ok = resp.ok;
@@ -410,6 +495,12 @@ async function sendApi() {
       } else {
         failCount += batch.length;
         batch.forEach(r => failedRows.push(r));
+        failures.push({
+          range: `${startIdx}–${endIdx}`,
+          status: resp.status,
+          orders: batch.map(getOrderNo).filter(Boolean).join('、'),
+          reason: extractReason(respText, resp.statusText || '失敗')
+        });
       }
 
       const item = document.createElement('div');
@@ -440,6 +531,12 @@ async function sendApi() {
       done += batch.length;
       failCount += batch.length;
       batch.forEach(r => failedRows.push(r));
+      failures.push({
+        range: `${startIdx}–${endIdx}`,
+        status: 'ERR',
+        orders: batch.map(getOrderNo).filter(Boolean).join('、'),
+        reason: `連線失敗：${err.message}`
+      });
       const item = document.createElement('div');
       item.className = 'res-item err';
       item.style.flexDirection = 'column';
@@ -456,10 +553,6 @@ async function sendApi() {
   }
 
   // 儲存歷史
-  const errMsgs = [];
-  document.querySelectorAll('.res-item.err .res-msg').forEach(el => {
-    errMsgs.push(el.textContent.trim());
-  });
   saveHistory({
     time: new Date().toLocaleString('zh-TW'),
     url: document.getElementById('apiUrl').value,
@@ -467,7 +560,7 @@ async function sendApi() {
     total: total,
     success: successCount,
     fail: failCount,
-    errors: errMsgs
+    failures: failures
   });
 
   // 完成摘要
@@ -560,10 +653,29 @@ function renderHistory() {
         <span class="tag tag-err">❌ 失敗 ${h.fail}</span>
         <span style="margin-left:auto;font-size:11px;color:#9ca3af">${h.method}</span>
       </div>
-      <div class="hist-url">🔗 ${h.url}</div>
-      ${h.fail > 0 ? `<div style="margin-top:6px;font-size:11px;color:#ef4444">失敗原因：${h.errors.slice(0,3).join('；')}</div>` : ''}
+      <div class="hist-url">🔗 ${esc(h.url)}</div>
+      ${renderHistFailures(h)}
     </div>
   `).join('');
+}
+
+function renderHistFailures(h) {
+  if (!h.fail) return '';
+  // 舊版記錄只有文字訊息
+  if (!h.failures) {
+    return `<div style="margin-top:6px;font-size:11px;color:#ef4444">失敗原因：${esc((h.errors || []).slice(0,3).join('；'))}</div>`;
+  }
+  return `<details class="hist-fails">
+    <summary>查看 ${h.failures.length} 筆失敗明細</summary>
+    <table>
+      <tr><th>第幾筆</th><th>訂單編號</th><th>狀態</th><th>原因</th></tr>
+      ${h.failures.map(f => `<tr>
+        <td>${esc(f.range)}</td><td>${esc(f.orders) || '—'}</td>
+        <td><span class="res-code">${esc(f.status)}</span></td>
+        <td style="color:#dc2626">${esc(f.reason)}</td>
+      </tr>`).join('')}
+    </table>
+  </details>`;
 }
 
 // 初始化
