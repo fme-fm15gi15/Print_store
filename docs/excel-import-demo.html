@@ -125,6 +125,8 @@
     <p style="text-align:center;margin-top:12px;font-size:12px;color:#9ca3af;">
       沒有 Excel？
       <a href="#" onclick="loadDemo(); return false;" style="color:#3b82f6;text-decoration:none;">點此載入示範資料</a>
+      &nbsp;｜&nbsp;
+      <a href="#" onclick="downloadTemplate(); return false;" style="color:#10b981;text-decoration:none;">⬇ 下載空白範本 Excel</a>
     </p>
   </div>
 
@@ -219,6 +221,26 @@
 <script>
 let rows = [];
 let validRows = [];
+
+// Download blank template
+function downloadTemplate() {
+  const cols = ['訂單編號', '收件人', '電話', '門市代碼', '門市名稱'];
+  const sample = [
+    ['ORD-001', '王小明', '0912345678', '006358', '7-ELEVEN 信義門市'],
+    ['ORD-002', '李大華', '0922456789', '003201', '全家 新莊店'],
+    ['', '', '', '', ''] // 空白列供填寫
+  ];
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([cols, ...sample]);
+  // 加粗 header
+  cols.forEach((_, i) => {
+    const cell = XLSX.utils.encode_cell({ r: 0, c: i });
+    if (!ws[cell]) return;
+    ws[cell].s = { font: { bold: true } };
+  });
+  XLSX.utils.book_append_sheet(wb, ws, '匯入資料');
+  XLSX.writeFile(wb, '匯入範本.xlsx');
+}
 
 // Demo data
 function loadDemo() {
