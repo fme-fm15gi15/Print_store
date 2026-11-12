@@ -83,6 +83,15 @@
   .hidden { display: none; }
   .section { margin-bottom: 20px; }
 
+  /* History */
+  .hist-item { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 16px; font-size: 13px; }
+  .hist-item:hover { border-color: #93c5fd; }
+  .hist-time { font-size: 11px; color: #9ca3af; margin-bottom: 4px; }
+  .hist-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .hist-url { font-size: 12px; color: #6b7280; font-family: monospace; word-break: break-all; margin-top:4px; }
+  .btn-hist { background: none; border: 1px solid #d1d5db; color: #6b7280; font-size: 12px; padding: 5px 12px; border-radius: 6px; cursor: pointer; }
+  .btn-hist:hover { border-color: #3b82f6; color: #3b82f6; }
+
   .action-bar { display: flex; gap: 10px; align-items: center; padding: 16px 20px; border-top: 1px solid #e5e7eb; }
   .btn-reset { background: none; border: 1px solid #d1d5db; color: #6b7280; padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; }
   .btn-reset:hover { border-color: #9ca3af; color: #374151; }
@@ -91,9 +100,25 @@
 </head>
 <body>
 
-<div class="header">
-  <h1>📊 Excel 批次匯入工具</h1>
-  <p>上傳 Excel → 自動驗證資料 → 批次呼叫 API</p>
+<div class="header" style="display:flex;justify-content:space-between;align-items:center;">
+  <div>
+    <h1>📊 Excel 批次匯入工具</h1>
+    <p>上傳 Excel → 自動驗證資料 → 批次呼叫 API</p>
+  </div>
+  <button onclick="toggleHistory()" style="background:#374151;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-size:13px;cursor:pointer;">
+    📋 歷史記錄 <span id="histCount"></span>
+  </button>
+</div>
+
+<!-- History Panel -->
+<div id="historyPanel" class="hidden" style="background:#fff;border-bottom:1px solid #e5e7eb;">
+  <div style="max-width:1100px;margin:0 auto;padding:16px 24px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <strong style="font-size:14px;">近期匯入記錄</strong>
+      <button onclick="clearHistory()" style="background:none;border:1px solid #fca5a5;color:#ef4444;font-size:12px;padding:4px 12px;border-radius:6px;cursor:pointer;">清除全部</button>
+    </div>
+    <div id="historyList" style="display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto;"></div>
+  </div>
 </div>
 
 <!-- Steps -->
@@ -430,6 +455,21 @@ async function sendApi() {
     await new Promise(r => setTimeout(r, 200));
   }
 
+  // 儲存歷史
+  const errMsgs = [];
+  document.querySelectorAll('.res-item.err .res-msg').forEach(el => {
+    errMsgs.push(el.textContent.trim());
+  });
+  saveHistory({
+    time: new Date().toLocaleString('zh-TW'),
+    url: document.getElementById('apiUrl').value,
+    method: document.getElementById('apiMethod').value,
+    total: total,
+    success: successCount,
+    fail: failCount,
+    errors: errMsgs
+  });
+
   // 完成摘要
   const summary = document.createElement('div');
   summary.style.cssText = 'margin-top:10px;padding:12px;background:#f9fafb;border-radius:8px;font-size:13px;border:1px solid #e5e7eb;';
@@ -471,6 +511,63 @@ function reset() {
   document.getElementById('responseSection').classList.add('hidden');
   setStep(1);
 }
+
+// ── History (localStorage) ─────────────────────────────
+function saveHistory(entry) {
+  const key = 'importHistory';
+  const list = JSON.parse(localStorage.getItem(key) || '[]');
+  list.unshift(entry);
+  if (list.length > 20) list.length = 20; // 只保留最近 20 筆
+  localStorage.setItem(key, JSON.stringify(list));
+  updateHistCount();
+}
+
+function getHistory() {
+  return JSON.parse(localStorage.getItem('importHistory') || '[]');
+}
+
+function clearHistory() {
+  localStorage.removeItem('importHistory');
+  renderHistory();
+  updateHistCount();
+}
+
+function updateHistCount() {
+  const list = getHistory();
+  const el = document.getElementById('histCount');
+  if (el) el.textContent = list.length > 0 ? `(${list.length})` : '';
+}
+
+function toggleHistory() {
+  renderHistory();
+  const p = document.getElementById('historyPanel');
+  p.classList.toggle('hidden');
+}
+
+function renderHistory() {
+  const list = getHistory();
+  const container = document.getElementById('historyList');
+  if (list.length === 0) {
+    container.innerHTML = '<div style="color:#9ca3af;font-size:13px;padding:8px 0">尚無記錄</div>';
+    return;
+  }
+  container.innerHTML = list.map((h, i) => `
+    <div class="hist-item">
+      <div class="hist-time">${h.time}</div>
+      <div class="hist-row">
+        <span class="tag tag-total">共 ${h.total} 筆</span>
+        <span class="tag tag-ok">✅ 成功 ${h.success}</span>
+        <span class="tag tag-err">❌ 失敗 ${h.fail}</span>
+        <span style="margin-left:auto;font-size:11px;color:#9ca3af">${h.method}</span>
+      </div>
+      <div class="hist-url">🔗 ${h.url}</div>
+      ${h.fail > 0 ? `<div style="margin-top:6px;font-size:11px;color:#ef4444">失敗原因：${h.errors.slice(0,3).join('；')}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+// 初始化
+updateHistCount();
 </script>
 </body>
 </html>
