@@ -331,35 +331,47 @@ async function sendApi() {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = token;
 
-  let done = 0;
+  let done = 0, successCount = 0, failCount = 0;
+  const failedRows = [];
   const total = validRows.length;
 
   const batches = [];
   for (let i = 0; i < total; i += batchSize) {
-    batches.push(validRows.slice(i, i + batchSize));
+    batches.push({ rows: validRows.slice(i, i + batchSize), startIdx: i + 1 });
   }
 
   for (let b = 0; b < batches.length; b++) {
-    const batch = batches[b];
+    const { rows: batch, startIdx } = batches[b];
     const body = batchSize === 1 ? batch[0] : batch;
-    const startIdx = b * batchSize + 1;
-    const endIdx = Math.min((b + 1) * batchSize, total);
+    const endIdx = Math.min(startIdx + batch.length - 1, total);
 
     try {
       const resp = await fetch(url, { method, headers, body: JSON.stringify(body) });
+      let respText = '';
+      try { respText = await resp.clone().text(); } catch {}
       const ok = resp.ok;
       done += batch.length;
 
+      if (ok) {
+        successCount += batch.length;
+      } else {
+        failCount += batch.length;
+        batch.forEach(r => failedRows.push(r));
+      }
+
       const item = document.createElement('div');
       item.className = `res-item ${ok ? 'ok' : 'err'}`;
-      item.innerHTML = `<span class="res-code">${resp.status}</span>
-        <span class="res-msg">第 ${startIdx}–${endIdx} 筆 → ${ok ? '成功' : `失敗（${resp.statusText}）`}</span>`;
+      const detail = !ok && respText ? `<details style="margin-top:4px;cursor:pointer"><summary style="font-size:11px;color:#9ca3af">▶ 展開回應內容</summary><pre style="font-size:11px;background:#fff;padding:6px;border-radius:4px;margin-top:4px;overflow:auto;max-height:80px">${respText.replace(/</g,'&lt;').substring(0,500)}</pre></details>` : '';
+      item.innerHTML = `<div style="flex:1"><span class="res-code">${resp.status}</span>
+        <span class="res-msg">第 ${startIdx}–${endIdx} 筆 → ${ok ? '✅ 成功' : `❌ 失敗（${resp.statusText}）`}</span>${detail}</div>`;
       document.getElementById('responseList').appendChild(item);
     } catch (err) {
       done += batch.length;
+      failCount += batch.length;
+      batch.forEach(r => failedRows.push(r));
       const item = document.createElement('div');
       item.className = 'res-item err';
-      item.innerHTML = `<span class="res-code">ERR</span><span class="res-msg">第 ${startIdx}–${endIdx} 筆 → ${err.message}</span>`;
+      item.innerHTML = `<span class="res-code">ERR</span><span class="res-msg">第 ${startIdx}–${endIdx} 筆 → ❌ ${err.message}</span>`;
       document.getElementById('responseList').appendChild(item);
     }
 
@@ -369,7 +381,27 @@ async function sendApi() {
     await new Promise(r => setTimeout(r, 200));
   }
 
+  // 完成摘要
+  const summary = document.createElement('div');
+  summary.style.cssText = 'margin-top:10px;padding:12px;background:#f9fafb;border-radius:8px;font-size:13px;border:1px solid #e5e7eb;';
+  summary.innerHTML = `<strong>送出完成</strong>　✅ 成功 ${successCount} 筆　❌ 失敗 ${failCount} 筆` +
+    (failCount > 0 ? `<button onclick="retryFailed()" style="margin-left:12px;background:#ef4444;color:#fff;border:none;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer">🔄 重試失敗的 ${failCount} 筆</button>` : '');
+  document.getElementById('responseList').appendChild(summary);
+
+  // 儲存失敗列供重試
+  window._failedRows = failedRows;
   document.getElementById('btnSend').disabled = false;
+}
+
+function retryFailed() {
+  if (!window._failedRows || window._failedRows.length === 0) return;
+  validRows = window._failedRows;
+  window._failedRows = [];
+  document.getElementById('responseList').innerHTML = '';
+  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('progressLabel').textContent = '0 / ' + validRows.length;
+  document.getElementById('tagValid').textContent = `重試 ${validRows.length} 筆失敗資料`;
+  sendApi();
 }
 
 function setStep(n) {
